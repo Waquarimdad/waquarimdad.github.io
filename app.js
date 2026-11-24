@@ -314,7 +314,7 @@ function tokenBucket(el) {
   new IntersectionObserver(([e]) => (visible = e.isIntersecting)).observe(el);
   function frame(now) {
     if (!el.isConnected) return;
-    const dt = Math.max(0, Math.min(0.1, (now - last) / 1000)); last = now;
+    const dt = Math.max(0, Math.min(1, (now - last) / 1000)); last = now;
     if (visible) {
       const cap = +inp("cap").value, rate = +inp("rate").value, rps = +inp("rps").value;
       S.tokens = Math.min(cap, S.tokens + rate * dt);
@@ -401,8 +401,11 @@ function mountHeroViz(host) {
 
   function step(now) {
     if (!host.isConnected) return;
-    const dt = Math.max(0, Math.min(0.05, (now - last) / 1000)) * pace; last = now;
-    if (visible && !document.hidden && !paused) {
+    // Advance by real elapsed time in small sub-steps, so it keeps moving even when the
+    // browser throttles frames (Low Power Mode, battery saver, embedded views).
+    let rem = Math.max(0, Math.min(1, (now - last) / 1000)) * pace; last = now;
+    if (visible && !document.hidden && !paused) while (rem > 0) {
+      const dt = Math.min(0.05, rem); rem -= dt;
       acc += dt * 3.2;
       while (acc >= 1) { acc--; spawn(); }
       // per-partition queue position
