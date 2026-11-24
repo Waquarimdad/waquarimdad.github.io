@@ -6,7 +6,7 @@
 const CONFIG = {
   name: "Waquar Imdad",
   email: "info.wimdad@gmail.com",
-  linkedin: "",                         // paste your LinkedIn URL; empty hides the links
+  linkedin: "https://www.linkedin.com/in/waquar-imdad-619b9b62/",   // empty hides the links
   github: "https://github.com/Waquarimdad",
   cv: "Waquar-Imdad-CV.pdf",            // drop the PDF next to index.html
 };
