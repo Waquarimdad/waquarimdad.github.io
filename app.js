@@ -464,6 +464,8 @@ function artFor(seed) {
   return `<svg viewBox="0 0 580 330" preserveAspectRatio="xMidYMid slice" aria-hidden="true">${g}<text x="24" y="316" font-family="JetBrains Mono, monospace" font-size="11" fill="currentColor" opacity=".55">${esc(seed)}.md</text></svg>`;
 }
 
+const coverImg = (p, eager) =>
+  `<img src="img/covers/${p.slug}.png" alt="${esc(p.title)}" width="1200" height="627"${eager ? "" : ' loading="lazy"'} decoding="async" onerror="this.replaceWith(Object.assign(document.createElement('span'),{innerHTML:artFor('${p.slug}')}))">`;
 const tagChips = (tags) => tags.map((t) => `<span class="chip">#${esc(t)}</span>`).join("");
 const metaLine = (p) => `<div class="meta"><time datetime="${p.date}">${fmtDate(p.date)}</time><span class="dot"></span><span>${p.mins} min read</span>${p.demo ? '<span class="badge-demo">Interactive</span>' : ""}</div>`;
 
@@ -539,6 +541,7 @@ function viewHome() {
     <div class="posts">
       ${rest.map((p) => `
       <a class="pcard reveal" href="#/blog/${p.slug}">
+        <div class="pcard-img">${coverImg(p)}</div>
         <span class="arrow">${ICON.arrow}</span>
         ${metaLine(p)}
         <h3>${esc(p.title)}</h3>
@@ -632,7 +635,7 @@ function renderBlogList() {
   const ps = POSTS.filter(hit);
   list.innerHTML = ps.length ? ps.map((p) => `
     <a class="row" href="#/blog/${p.slug}">
-      <time datetime="${p.date}">${fmtDate(p.date)}</time>
+      <div class="row-img">${coverImg(p)}<time datetime="${p.date}">${fmtDate(p.date)}</time></div>
       <div><h3>${mark(p.title)}</h3><p>${mark(p.dek)}</p><div class="tags" style="margin-top:12px">${tagChips(p.tags)}${p.demo ? ' <span class="badge-demo">Interactive</span>' : ""}</div></div>
       <span class="rt">${p.mins} min</span>
     </a>`).join("") : `<div class="empty">Nothing matches “${esc(blogState.q)}”. Try <a href="#/blog" data-clear>clearing the filter</a>.</div>`;
@@ -649,7 +652,8 @@ function viewPost(p) {
       <p class="dek">${esc(p.dek)}</p>
       <div class="meta" style="gap:18px"><span class="mark" style="width:26px;height:26px;font-size:10px;border-radius:7px">WI</span><span>${CONFIG.name}</span><span class="dot"></span><time datetime="${p.date}">${fmtDate(p.date)}</time><span class="dot"></span><span>${p.mins} min read</span></div>
       <div class="tags" style="margin-top:18px">${p.tags.map((t) => `<a class="chip" style="text-decoration:none" href="#/blog?tag=${encodeURIComponent(t)}">#${esc(t)}</a>`).join("")}</div>
-    </div></header>
+    </div>
+    <figure class="post-cover">${coverImg(p, true)}</figure></header>
     <div class="wrap post-layout">
       <div>
         <div class="prose" id="prose">${html}</div>

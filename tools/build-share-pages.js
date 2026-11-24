@@ -24,7 +24,7 @@ for (const p of window.POSTS) {
 <meta property="og:description" content="${esc(p.dek)}">
 <meta property="og:url" content="${url}">
 <meta property="og:site_name" content="Waquar Imdad">
-<meta property="og:image" content="${SITE}/og.png">
+<meta property="og:image" content="${SITE}/img/covers/${p.slug}.png">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="627">
 <meta property="article:author" content="Waquar Imdad">
