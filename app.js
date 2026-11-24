@@ -6,7 +6,7 @@
 const CONFIG = {
   name: "Waquar Imdad",
   email: "info.wimdad@gmail.com",
-  linkedin: "https://www.linkedin.com/in/your-handle",
+  linkedin: "",                         // paste your LinkedIn URL; empty hides the links
   github: "https://github.com/Waquarimdad",
   cv: "Waquar-Imdad-CV.pdf",            // drop the PDF next to index.html
 };
@@ -593,7 +593,7 @@ function viewHome() {
       <p>I’m looking for senior backend roles where correctness and scale both matter. I can join immediately — email is the fastest way to reach me.</p>
       <div class="cta">
         <a class="btn btn-primary" href="mailto:${CONFIG.email}">${ICON.mail} ${esc(CONFIG.email)}</a>
-        <a class="btn btn-ghost" href="${CONFIG.linkedin}" target="_blank" rel="noopener">${ICON.li} LinkedIn</a>
+        <a class="btn btn-ghost" href="${CONFIG.linkedin}" target="_blank" rel="noopener" aria-label="LinkedIn">${ICON.li} LinkedIn</a>
         <a class="btn btn-ghost" href="${CONFIG.cv}" download>${ICON.down} CV</a>
       </div>
     </div>
@@ -708,6 +708,7 @@ function route() {
     navKey = "blog"; window.scrollTo(0, 0);
   } else { app.innerHTML = view404(); window.scrollTo(0, 0); }
 
+  if (!CONFIG.linkedin) $$('a[aria-label="LinkedIn"], a[data-cfg-href="linkedin"]').forEach((a) => a.remove());
   $$("[data-nav]").forEach((a) => a.classList.toggle("active", a.dataset.nav === navKey));
   if (scrollTo) requestAnimationFrame(() => { const el = document.getElementById(scrollTo); if (el) el.scrollIntoView({ behavior: reduceMotion ? "auto" : "smooth" }); });
   else if (!parts.length) window.scrollTo({ top: 0, behavior: reduceMotion ? "auto" : "smooth" });
@@ -810,7 +811,7 @@ function commands() {
     { g: "Actions", t: "Copy email address", s: "", ic: ICON.mail, run: () => copy(CONFIG.email, "Email copied") },
     { g: "Actions", t: "Copy link to this page", s: "", ic: ICON.link, run: () => copy(location.href, "Link copied") },
     { g: "Actions", t: "Download CV", s: "PDF", ic: ICON.down, run: () => { const a = document.createElement("a"); a.href = CONFIG.cv; a.download = ""; a.click(); } },
-    { g: "Actions", t: "Open LinkedIn", s: "↗", ic: ICON.li, run: () => open(CONFIG.linkedin, "_blank", "noopener") },
+    ...(CONFIG.linkedin ? [{ g: "Actions", t: "Open LinkedIn", s: "↗", ic: ICON.li, run: () => open(CONFIG.linkedin, "_blank", "noopener") }] : []),
     { g: "Actions", t: "Open GitHub", s: "↗", ic: ICON.gh, run: () => open(CONFIG.github, "_blank", "noopener") },
   ];
 }
