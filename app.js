@@ -873,3 +873,14 @@ $("#yr").textContent = new Date().getFullYear();
 $$("[data-cfg-href]").forEach((a) => (a.href = CONFIG[a.dataset.cfgHref]));
 addEventListener("hashchange", route);
 route();
+
+/* self-update: if the browser served a cached old page, reload once into the latest deploy */
+(() => {
+  const mine = (document.currentScript?.src.match(/[?&]v=(\d+)/) || [])[1];
+  if (!mine || location.protocol === "file:") return;
+  fetch("index.html", { cache: "no-store" }).then((r) => r.text()).then((html) => {
+    const latest = (html.match(/app\.js\?v=(\d+)/) || [])[1];
+    let key = "reloaded-for-" + latest;
+    try { if (latest && latest !== mine && !sessionStorage.getItem(key)) { sessionStorage.setItem(key, "1"); location.reload(); } } catch (e) {}
+  }).catch(() => {});
+})();
