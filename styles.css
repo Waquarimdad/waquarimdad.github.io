@@ -480,3 +480,9 @@ footer { padding: 56px 0 48px; margin-top: 56px; border-top: 1px solid var(--lin
 
 .viz-head > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; flex: 1; text-align: center; }
 @media (max-width: 520px) { .viz-head > span { display: none; } }
+
+/* ---------- Headshot ---------- */
+.avatar { width: 30px; height: 30px; border-radius: 50%; object-fit: cover; display: inline-block; flex: none; border: 1px solid var(--line-2); background: var(--bg-2); }
+.avatar-md { width: 56px; height: 56px; }
+.avatar-lg { width: 64px; height: 64px; border: 3px solid var(--surface); box-shadow: 0 0 0 1px var(--line-2), var(--shadow); }
+.hero-id { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
