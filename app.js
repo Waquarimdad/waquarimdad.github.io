@@ -345,7 +345,7 @@ function mountHeroViz(host) {
   const down = new Set();
   host.innerHTML = `
     <div class="viz-head"><div class="dots"><i></i><i></i><i></i></div><span>orders.events · 3 partitions · group=ledger</span>
-      <div class="viz-btns"><button type="button" data-v="burst">burst</button><button type="button" data-v="kill">kill c2</button></div></div>
+      <div class="viz-btns"><button type="button" data-v="pause" aria-pressed="false" aria-label="Pause or play animation">❚❚ pause</button><button type="button" data-v="burst">burst</button><button type="button" data-v="kill">kill c2</button></div></div>
     <svg viewBox="0 0 ${W} ${H}" aria-label="Animated diagram: producers publish keyed events to three Kafka partitions consumed by a consumer group" role="img">
       <g id="wires"></g>
       ${prodY.map((y, i) => `<g><rect class="n-box" x="16" y="${y}" width="98" height="44" rx="10"/><text class="n-label" x="65" y="${y + 21}" text-anchor="middle">producer-${i + 1}</text><text class="n-sub" x="65" y="${y + 34}" text-anchor="middle">${["CHECKOUT", "REPAY", "REFUND"][i]}</text></g>`).join("")}
@@ -384,12 +384,13 @@ function mountHeroViz(host) {
   }
   const bez = (a, b, c, d, t) => (1 - t) ** 3 * a + 3 * (1 - t) ** 2 * t * b + 3 * (1 - t) * t * t * c + t ** 3 * d;
 
-  let last = performance.now(), acc = 0, visible = true, hover = false;
+  // Runs everywhere. With "Reduce motion" on, it runs calmer instead of freezing; the pause button stops it for anyone.
+  const pace = reduceMotion ? 0.6 : 1;
+  let last = performance.now(), acc = 0, visible = true, paused = false;
   new IntersectionObserver(([e]) => (visible = e.isIntersecting)).observe(host);
-  host.addEventListener("mouseenter", () => (hover = true));
-  host.addEventListener("mouseleave", () => (hover = false));
   $$("[data-v]", host).forEach((b) => b.addEventListener("click", () => {
-    if (b.dataset.v === "burst") for (let k = 0; k < 18; k++) setTimeout(spawn, k * 40);
+    if (b.dataset.v === "pause") { paused = !paused; b.textContent = paused ? "▶ play" : "❚❚ pause"; b.setAttribute("aria-pressed", String(paused)); return; }
+    if (b.dataset.v === "burst") { if (paused) $('[data-v="pause"]', host).click(); for (let k = 0; k < 18; k++) setTimeout(spawn, k * 40); }
     else {
       if (down.has(1)) { down.delete(1); assign = [0, 1, 2]; b.textContent = "kill c2"; }
       else { down.add(1); assign = [0, 0, 2]; b.textContent = "revive c2"; }
@@ -400,8 +401,8 @@ function mountHeroViz(host) {
 
   function step(now) {
     if (!host.isConnected) return;
-    const dt = Math.min(0.05, (now - last) / 1000); last = now;
-    if (visible && !document.hidden && !hover) {
+    const dt = Math.min(0.05, (now - last) / 1000) * pace; last = now;
+    if (visible && !document.hidden && !paused) {
       acc += dt * 3.2;
       while (acc >= 1) { acc--; spawn(); }
       // per-partition queue position
@@ -438,12 +439,7 @@ function mountHeroViz(host) {
     }
     requestAnimationFrame(step);
   }
-  if (reduceMotion) {
-    for (let k = 0; k < 9; k++) spawn();
-    pk.forEach((p, k) => { p.el.setAttribute("cx", 300 + Math.floor(k / 3) * 16); p.el.setAttribute("cy", P[p.part]); });
-    $("#vp", host).textContent = produced; $("#vl", host).textContent = pk.length;
-  }
-  else requestAnimationFrame(step);
+  requestAnimationFrame(step);
 }
 
 /* ==========================================================
