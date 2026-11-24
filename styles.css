@@ -213,7 +213,7 @@ kbd { font: 500 11px/1 var(--mono); padding: 3px 5px; border-radius: 5px; border
 .pcard:hover .pcard-img img { transform: scale(1.04); }
 .pcard .arrow { z-index: 2; background: var(--surface); border-radius: 8px; padding: 4px; }
 .row-img { display: flex; flex-direction: column; gap: 10px; }
-.row-img img { width: 100%; aspect-ratio: 1200 / 627; object-fit: cover; border-radius: 10px; border: 1px solid var(--line); display: block; background: var(--ink); }
+.row-img img { width: 100%; height: auto; aspect-ratio: 1200 / 627; object-fit: cover; border-radius: 10px; border: 1px solid var(--line); display: block; background: var(--ink); }
 .post-cover { margin: 0 0 48px; max-width: 980px; border-radius: 20px; overflow: hidden; border: 1px solid var(--line); box-shadow: var(--shadow); background: var(--ink); }
 .post-cover img { display: block; width: 100%; height: auto; }
 .hero { position: relative; isolation: isolate; }
@@ -498,3 +498,11 @@ footer { padding: 56px 0 48px; margin-top: 56px; border-top: 1px solid var(--lin
 .ob-dots i.lost { background: var(--accent); }
 .demo-btns button:disabled { opacity: .4; cursor: not-allowed; }
 @media (max-width: 760px) { .ob-cols { grid-template-columns: 1fr; } .ob-col { min-height: 60px; } }
+.post-cover img, .pcard-img img, .feat-art img { max-width: 100%; }
+@media (max-width: 760px) { .row-img { flex-direction: row; align-items: center; gap: 14px; } .row-img img { width: 140px; flex: none; } }
+@media (max-width: 760px) {
+  .filters { position: static; flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; -webkit-overflow-scrolling: touch; padding: 14px 0; }
+  .filters::-webkit-scrollbar { display: none; }
+  .filters .search { flex: 0 0 220px; }
+  .filters .tagbtn { flex: none; }
+}
