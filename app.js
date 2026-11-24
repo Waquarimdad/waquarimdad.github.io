@@ -477,7 +477,6 @@ function viewHome() {
     <div class="hero-grid">
       <div>
         <div class="hero-id reveal">
-          <img class="avatar avatar-lg" src="img/headshot.jpg" alt="Waquar Imdad" width="64" height="64">
           <span class="status"><span class="pulse"></span>Open to senior backend roles · immediate joiner</span>
         </div>
         <h1 class="reveal">Systems that stay <em>correct</em> when the network doesn’t.</h1>
@@ -653,7 +652,7 @@ function viewPost(p) {
       <a class="back" href="#/blog">← All writing</a>
       <h1>${esc(p.title)}</h1>
       <p class="dek">${esc(p.dek)}</p>
-      <div class="meta" style="gap:18px"><img class="avatar" src="img/headshot.jpg" alt="" width="30" height="30"><span>${CONFIG.name}</span><span class="dot"></span><time datetime="${p.date}">${fmtDate(p.date)}</time><span class="dot"></span><span>${p.mins} min read</span></div>
+      <div class="meta" style="gap:18px"><span class="mark" style="width:26px;height:26px;font-size:10px;border-radius:7px">WI</span><span>${CONFIG.name}</span><span class="dot"></span><time datetime="${p.date}">${fmtDate(p.date)}</time><span class="dot"></span><span>${p.mins} min read</span></div>
       <div class="tags" style="margin-top:18px">${p.tags.map((t) => `<a class="chip" style="text-decoration:none" href="#/blog?tag=${encodeURIComponent(t)}">#${esc(t)}</a>`).join("")}</div>
     </div>
     <figure class="post-cover">${coverImg(p, true)}</figure></header>
@@ -661,7 +660,7 @@ function viewPost(p) {
       <div>
         <div class="prose" id="prose">${html}</div>
         <div class="author">
-          <img class="avatar avatar-md" src="img/headshot.jpg" alt="Waquar Imdad" width="56" height="56">
+          <span class="mark">WI</span>
           <div><b>${CONFIG.name}</b><p>Senior backend engineer — Java, Spring Boot, Kafka, Redis, AWS. Open to new roles. <a href="#/contact">Get in touch →</a></p></div>
         </div>
         <nav class="post-foot" aria-label="More articles">
