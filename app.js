@@ -7,7 +7,7 @@ const CONFIG = {
   name: "Waquar Imdad",
   email: "info.wimdad@gmail.com",
   linkedin: "https://www.linkedin.com/in/your-handle",
-  github: "https://github.com/wimdad",
+  github: "https://github.com/Waquarimdad",
   cv: "Waquar-Imdad-CV.pdf",            // drop the PDF next to index.html
 };
 
