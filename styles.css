@@ -486,3 +486,15 @@ footer { padding: 56px 0 48px; margin-top: 56px; border-top: 1px solid var(--lin
 .avatar-md { width: 56px; height: 56px; }
 .avatar-lg { width: 64px; height: 64px; border: 3px solid var(--surface); box-shadow: 0 0 0 1px var(--line-2), var(--shadow); }
 .hero-id { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+
+/* outbox demo */
+.ob-cols { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+.ob-col { border: 1px solid var(--line); border-radius: 12px; background: var(--bg); padding: 10px; min-height: 120px; transition: opacity .2s; }
+.ob-col > span { display: block; font: 500 10.5px/1.3 var(--mono); text-transform: uppercase; letter-spacing: .05em; color: var(--ink-3); margin-bottom: 8px; }
+.ob-dots { display: flex; flex-wrap: wrap; gap: 5px; }
+.ob-dots i { font: 600 10px/22px var(--mono); font-style: normal; min-width: 22px; height: 22px; padding: 0 4px; border-radius: 6px; text-align: center; color: #fff; }
+.ob-dots i.ok { background: var(--ok); }
+.ob-dots i.wait { background: #c79a2b; }
+.ob-dots i.lost { background: var(--accent); }
+.demo-btns button:disabled { opacity: .4; cursor: not-allowed; }
+@media (max-width: 760px) { .ob-cols { grid-template-columns: 1fr; } .ob-col { min-height: 60px; } }

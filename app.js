@@ -191,6 +191,27 @@ function md(src) {
    Diagrams (inline SVG, themed by CSS variables)
    ========================================================== */
 const FIGS = {
+  outbox: {
+    cap: "The request path writes only to Postgres. The relay publishes outbox rows to Kafka and marks them published after the broker acks.",
+    svg: () => {
+      const box = (x, y, w, h, t, s, cls = "d-box") => `<rect class="${cls}" x="${x}" y="${y}" width="${w}" height="${h}" rx="10"/><text class="d-t" x="${x + w / 2}" y="${y + h / 2 - (s ? 3 : -4)}" text-anchor="middle">${t}</text>${s ? `<text class="d-s" x="${x + w / 2}" y="${y + h / 2 + 14}" text-anchor="middle">${s}</text>` : ""}`;
+      const arr = (x1, y1, x2, y2, cls = "") => `<line class="d-line ${cls}" x1="${x1}" y1="${y1}" x2="${x2 - 6}" y2="${y2}"/><path class="d-line ${cls}" d="M${x2 - 12} ${y2 - 5} L${x2} ${y2} L${x2 - 12} ${y2 + 5}"/>`;
+      return `<svg viewBox="0 0 660 260" role="img" aria-label="Transactional outbox: service writes order and outbox row in one transaction; relay publishes to Kafka">
+        ${box(14, 100, 120, 60, "Order API", "Spring Boot")}
+        <rect class="d-good" x="176" y="30" width="200" height="200" rx="14" stroke-dasharray="5 4" fill-opacity=".35"/>
+        <text class="d-s" x="276" y="52" text-anchor="middle" style="fill:var(--ok)">ONE TRANSACTION</text>
+        ${box(196, 66, 160, 56, "orders", "INSERT row")}
+        ${box(196, 140, 160, 56, "outbox", "INSERT event")}
+        ${arr(134, 116, 196, 94, "d-okl")}${arr(134, 144, 196, 168, "d-okl")}
+        ${box(418, 140, 100, 56, "Relay", "SKIP LOCKED")}
+        ${arr(356, 168, 418, 168)}
+        ${box(556, 100, 92, 60, "Kafka", "orders.events")}
+        ${arr(518, 158, 556, 140)}
+        <path class="d-line d-dash" d="M468 196 C 468 236, 300 240, 290 198"/><text class="d-s" x="380" y="248" text-anchor="middle">mark published after ack</text>
+        <text class="d-s" x="602" y="186" text-anchor="middle">consumers</text><text class="d-s" x="602" y="200" text-anchor="middle">dedupe on event-id</text>
+      </svg>`;
+    },
+  },
   idempotency: {
     cap: "First attempt times out after the work commits. The retry carries the same key and gets the stored response.",
     svg: () => {
@@ -269,6 +290,77 @@ function mountFigs(root) {
    ========================================================== */
 function mountDemos(root) {
   $$('[data-demo="token-bucket"]', root).forEach(tokenBucket);
+  $$('[data-demo="outbox"]', root).forEach(outboxDemo);
+}
+
+/* Interactive: dual write vs transactional outbox, with crashes */
+function outboxDemo(el) {
+  el.className = "demo";
+  el.innerHTML = `
+    <div class="demo-head"><b><span class="badge-demo">Live</span> Dual write vs outbox</b>
+      <div class="demo-btns">
+        <button type="button" data-m="dual" class="hot">Dual write</button><button type="button" data-m="outbox">Outbox</button>
+      </div></div>
+    <div class="demo-body">
+      <div class="demo-ctrl">
+        <label><span>Crash after commit <output data-o="crash"></output></span><input type="range" min="0" max="100" step="10" value="30" data-i="crash"></label>
+        <div class="demo-btns" style="flex-direction:column;align-items:stretch">
+          <button type="button" data-a="one">Place 1 order</button>
+          <button type="button" data-a="ten">Place 10 orders</button>
+          <button type="button" data-a="relay">Run relay</button>
+          <button type="button" data-a="reset">Reset</button>
+        </div>
+      </div>
+      <div class="demo-stage">
+        <div class="ob-cols">
+          <div class="ob-col"><span>Postgres · orders</span><div class="ob-dots" data-c="db"></div></div>
+          <div class="ob-col" data-outbox-col><span>Postgres · outbox (unpublished)</span><div class="ob-dots" data-c="ob"></div></div>
+          <div class="ob-col"><span>Kafka · orders.events</span><div class="ob-dots" data-c="kf"></div></div>
+        </div>
+        <div class="demo-stats"><div><span>Orders saved</span><b data-s="db">0</b></div><div><span>Events in Kafka</span><b data-s="kf">0</b></div><div><span>Lost events</span><b data-s="lost">0</b></div></div>
+        <p class="demo-note" data-note></p>
+      </div>
+    </div>`;
+  const S = { mode: "dual", db: [], ob: [], kf: [], n: 0 };
+  const crash = $('[data-i="crash"]', el);
+  const sync = () => ($('[data-o="crash"]', el).textContent = crash.value + "%");
+  crash.addEventListener("input", sync); sync();
+  const dot = (id, cls) => `<i class="${cls}" title="order #${id}">${id}</i>`;
+  function render() {
+    const inKafka = new Set(S.kf), pending = new Set(S.ob);
+    $('[data-c="db"]', el).innerHTML = S.db.map((id) => dot(id, inKafka.has(id) ? "ok" : pending.has(id) ? "wait" : "lost")).join("");
+    $('[data-c="ob"]', el).innerHTML = S.ob.map((id) => dot(id, "wait")).join("");
+    $('[data-c="kf"]', el).innerHTML = S.kf.map((id) => dot(id, "ok")).join("");
+    const lost = S.db.filter((id) => !inKafka.has(id) && !pending.has(id)).length;
+    $('[data-s="db"]', el).textContent = S.db.length;
+    $('[data-s="kf"]', el).textContent = S.kf.length;
+    const l = $('[data-s="lost"]', el); l.textContent = lost; l.style.color = lost ? "var(--accent)" : "";
+    $("[data-outbox-col]", el).style.opacity = S.mode === "outbox" ? 1 : 0.35;
+    $('[data-a="relay"]', el).disabled = S.mode !== "outbox";
+    $("[data-note]", el).textContent = S.mode === "dual"
+      ? (lost ? `${lost} order(s) were saved, but the pod died before publishing. No consumer will ever hear about them.` : "Each order is saved, then published in a second step. Crashes land in the gap between the two.")
+      : (S.ob.length ? `${S.ob.length} event(s) waiting in the outbox. They're safe in Postgres. Run the relay and they reach Kafka.` : "The order and its event commit together. The relay publishes later, so a crash just delays an event.");
+  }
+  function place() {
+    const id = ++S.n, crashed = Math.random() * 100 < +crash.value;
+    S.db.push(id);
+    if (S.mode === "dual") { if (!crashed) S.kf.push(id); }
+    else { S.ob.push(id); }
+  }
+  function relay() { while (S.ob.length) S.kf.push(S.ob.shift()); }
+  $$("[data-m]", el).forEach((b) => b.addEventListener("click", () => {
+    S.mode = b.dataset.m; S.db = []; S.ob = []; S.kf = []; S.n = 0;
+    $$("[data-m]", el).forEach((x) => x.classList.toggle("hot", x === b)); render();
+  }));
+  $$("[data-a]", el).forEach((b) => b.addEventListener("click", () => {
+    const a = b.dataset.a;
+    if (a === "one") place();
+    if (a === "ten") for (let k = 0; k < 10; k++) place();
+    if (a === "relay") relay();
+    if (a === "reset") { S.db = []; S.ob = []; S.kf = []; S.n = 0; }
+    render();
+  }));
+  render();
 }
 
 function tokenBucket(el) {

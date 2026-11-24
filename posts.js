@@ -9,6 +9,174 @@
    ========================================================== */
 window.POSTS = [
 {
+  slug: "transactional-outbox-kafka-spring-boot",
+  title: "The dual-write trap: publishing Kafka events reliably with the transactional outbox",
+  dek: "Saving to the database and publishing to Kafka looks like two lines of code. It's actually a distributed transaction, and it fails in the gap between them.",
+  date: "2026-11-24",
+  tags: ["kafka", "spring-boot", "postgres", "distributed-systems"],
+  demo: true,
+  body: `
+> !tldr Never write to your database and publish to Kafka as two separate steps in the request path. Write the business row **and** an "outbox" row in the same database transaction, and let a separate relay publish outbox rows to Kafka. You trade "exactly once" for "at least once, never lost". Make your consumers idempotent and that trade is free.
+
+## Two lines, one bug
+
+Almost every event-driven service has a method that looks like this:
+
+~~~java
+@Transactional
+public Order placeOrder(PlaceOrder cmd) {
+    Order order = orders.save(Order.from(cmd));
+    kafka.send("orders.events", order.id(), OrderPlaced.of(order));
+    return order;
+}
+~~~
+
+It reads well and passes every test. But the database and Kafka are two systems, and nothing makes them agree. There are two ways this goes wrong:
+
+- **The publish fails after the commit.** The pod is killed during a deploy, the broker is briefly unreachable, or the send times out. The order exists, but no service downstream ever hears about it. Billing never bills it, the warehouse never ships it.
+- **The publish succeeds and the commit fails.** \`kafka.send\` is asynchronous and doesn't join your database transaction. If the transaction rolls back after the send, for example on a constraint violation at flush time, consumers react to an order that doesn't exist.
+
+Swapping the order of the two lines doesn't fix it; it just swaps which failure you get. This is the **dual-write problem**, and it shows up in production precisely when you're busiest: during deploys, broker failovers and traffic spikes.
+
+Try it. Turn on "crash after commit" and place a few orders in each mode:
+
+:::demo outbox
+
+## The pattern
+
+The fix is to stop writing to two systems in the request path. Write to **one**, your database, and move the Kafka publish somewhere that can retry safely.
+
+:::fig outbox
+
+1. In the same transaction as the business change, insert a row into an \`outbox\` table describing the event.
+2. Commit. The order and its event now either both exist or neither does, because Postgres guarantees it.
+3. A separate **relay** reads unpublished outbox rows, sends them to Kafka, and marks them published.
+
+If the relay crashes after sending but before marking, it sends the row again on restart. That's a duplicate, never a loss. Duplicates are something you already know how to handle.
+
+## The outbox table
+
+~~~sql
+CREATE TABLE outbox (
+  id             uuid        PRIMARY KEY,
+  aggregate_type text        NOT NULL,     -- 'Order'
+  aggregate_id   text        NOT NULL,     -- becomes the Kafka key
+  event_type     text        NOT NULL,     -- 'OrderPlaced'
+  payload        jsonb       NOT NULL,
+  created_at     timestamptz NOT NULL DEFAULT now(),
+  published_at   timestamptz
+);
+
+CREATE INDEX outbox_unpublished ON outbox (created_at) WHERE published_at IS NULL;
+~~~
+
+The partial index keeps the relay's query fast no matter how much history accumulates.
+
+## Writing the event
+
+~~~java
+@Transactional
+public Order placeOrder(PlaceOrder cmd) {
+    Order order = orders.save(Order.from(cmd));
+    outbox.save(OutboxEvent.of(
+        "Order", order.id().toString(), "OrderPlaced", json(OrderPlaced.of(order))));
+    return order;   // no Kafka call here
+}
+~~~
+
+The request path now talks to exactly one system. It's also faster and no longer fails when Kafka is having a bad minute.
+
+## The relay
+
+~~~java
+@Component
+@RequiredArgsConstructor
+public class OutboxRelay {
+    private final JdbcTemplate jdbc;
+    private final KafkaTemplate<String, String> kafka;
+
+    @Scheduled(fixedDelay = 500)
+    @Transactional
+    public void publishBatch() {
+        List<OutboxRow> rows = jdbc.query("""
+            SELECT id, aggregate_id, event_type, payload FROM outbox
+             WHERE published_at IS NULL
+             ORDER BY created_at
+             LIMIT 100
+             FOR UPDATE SKIP LOCKED
+            """, OutboxRow.MAPPER);
+
+        for (OutboxRow r : rows) {
+            ProducerRecord<String, String> rec =
+                new ProducerRecord<>("orders.events", r.aggregateId(), r.payload());
+            rec.headers().add("event-id", r.id().toString().getBytes());
+            rec.headers().add("event-type", r.eventType().getBytes());
+            kafka.send(rec).get(10, TimeUnit.SECONDS);   // wait for the broker ack
+        }
+        jdbc.batchUpdate("UPDATE outbox SET published_at = now() WHERE id = ?",
+            rows, rows.size(), (ps, r) -> ps.setObject(1, r.id()));
+    }
+}
+~~~
+
+A few details carry most of the weight:
+
+- **\`FOR UPDATE SKIP LOCKED\`** lets you run the relay on every pod. Each instance claims a different batch instead of all of them publishing the same rows.
+- **Wait for the ack** before marking a row published. Fire-and-forget brings back the exact gap you're closing.
+- **Key by aggregate ID**, so all events for one order land on one partition, in order.
+- **Send the outbox ID as a header.** It's the idempotency key consumers dedupe on.
+- **Producer settings:** \`acks=all\` and \`enable.idempotence=true\`, so broker-side retries don't add duplicates of their own.
+
+> !warn Ordering is per aggregate, not global. If the relay publishes in batches across several pods, events for *different* orders can interleave, which is fine. Events for the *same* order keep their order only if one key always goes to one partition and you never publish a later row for that key before an earlier one fails.
+
+## Polling or CDC?
+
+The relay above polls. The other option is change data capture: a tool like Debezium tails the Postgres write-ahead log and streams outbox inserts to Kafka without any polling query.
+
+| | Polling relay | CDC (e.g. Debezium) |
+|---|---|---|
+| Moving parts | Just your service | Kafka Connect + connector |
+| Latency | Poll interval (sub-second is fine) | Near real time |
+| DB load | One indexed query per interval | Reads the WAL, no queries |
+| Ops effort | Low | Higher: replication slots, connector upgrades |
+| Best when | You're starting out, moderate volume | High volume, many services, a platform team |
+
+Start with polling. It's a hundred lines you fully understand, and the outbox table means you can switch to CDC later without changing a single producer.
+
+## The consumer side
+
+At-least-once delivery means every consumer must tolerate seeing an event twice. The cheapest way is a processed-events table, written in the same transaction as the effect:
+
+~~~java
+@KafkaListener(topics = "orders.events", groupId = "billing")
+@Transactional
+public void on(ConsumerRecord<String, String> rec) {
+    UUID eventId = UUID.fromString(new String(rec.headers().lastHeader("event-id").value()));
+    if (processed.insertIfAbsent(eventId) == 0) return;   // already handled
+    billing.createInvoice(parse(rec.value()));
+}
+~~~
+
+This is the same idea as idempotency keys on an API: record that you did the work in the same transaction as the work.
+
+## Housekeeping
+
+- **Clean up** published rows on a schedule, for example by deleting rows published more than a few days ago. Or partition the table by day and drop old partitions.
+- **Alert on age, not count.** "Oldest unpublished row is older than a minute" catches a stuck relay. A row count doesn't tell you whether things are moving.
+- **Keep payloads self-contained.** Put what consumers need in the event, so they don't call back into your service and race your own updates.
+
+## Checklist
+
+- The business change and the outbox insert commit in **one** transaction.
+- The request path never calls Kafka directly.
+- The relay claims rows with \`SKIP LOCKED\` and marks them only after the broker acks.
+- Kafka key = aggregate ID; the event ID travels as a header.
+- The producer runs with \`acks=all\` and idempotence on.
+- Consumers dedupe on event ID in the same transaction as their effect.
+- You alert on the age of the oldest unpublished row.
+`
+},
+{
   slug: "idempotency-keys-pay-once",
   title: "Pay once means once: idempotency keys for money-moving APIs",
   dek: "Retries are not an edge case. In payments and lending they are the normal path, and the API has to be designed so that the second call is boring.",

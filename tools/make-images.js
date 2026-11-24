@@ -35,6 +35,11 @@ function motif(slug, x0, y0) {
     d.push("-stroke", PAPER, "-strokewidth", "10"); L(`arc ${x0 + 90},${y0 + 30} ${x0 + 210},${y0 + 170} 180,360`); L(`line ${x0 + 90},${y0 + 100} ${x0 + 90},${y0 + 130}`); L(`line ${x0 + 210},${y0 + 100} ${x0 + 210},${y0 + 130}`);
     d.push("-stroke", "none", "-fill", ACC); L(`roundrectangle ${x0 + 60},${y0 + 130} ${x0 + 240},${y0 + 270} 16,16`);
     d.push("-font", MONO_B, "-pointsize", "34", "-fill", INK, "-annotate", `+${x0 + 112}+${y0 + 213}`, "#34");
+  } else if (slug.startsWith("transactional-outbox")) {
+    d.push("-stroke", OK, "-strokewidth", "4", "-fill", "none", "-draw", `roundrectangle ${x0},${y0 + 40} ${x0 + 130},${y0 + 260} 14,14`);
+    d.push("-stroke", PAPER, "-draw", `roundrectangle ${x0 + 20},${y0 + 70} ${x0 + 110},${y0 + 130} 8,8`, "-draw", `roundrectangle ${x0 + 20},${y0 + 170} ${x0 + 110},${y0 + 230} 8,8`);
+    d.push("-stroke", ACC, "-draw", `line ${x0 + 120},${y0 + 200} ${x0 + 190},${y0 + 200}`, "-draw", `line ${x0 + 182},${y0 + 192} ${x0 + 192},${y0 + 200}`, "-draw", `line ${x0 + 182},${y0 + 208} ${x0 + 192},${y0 + 200}`);
+    for (let p = 0; p < 3; p++) { const y = y0 + 150 + p * 40; d.push("-stroke", DIM, "-strokewidth", "3", "-draw", `roundrectangle ${x0 + 200},${y - 14} ${x0 + 300},${y + 14} 8,8`, "-stroke", "none", "-fill", p === 1 ? ACC : PAPER, "-draw", `circle ${x0 + 280},${y} ${x0 + 286},${y}`, "-draw", `circle ${x0 + 256},${y} ${x0 + 262},${y}`, "-fill", "none"); }
   } else if (slug.startsWith("cache")) {
     for (let i = 0; i < 4; i++) { d.push("-stroke", i === 0 ? ACC : PAPER, "-fill", "none"); L(`roundrectangle ${x0 + 40 + i * 12},${y0 + 60 + i * 50} ${x0 + 260 - i * 12},${y0 + 100 + i * 50} 10,10`); }
     d.push("-stroke", "none", "-fill", ACC); for (let i = 0; i < 6; i++) L(`circle ${x0 + 20 + i * 52},${y0 + 285} ${x0 + 26 + i * 52},${y0 + 285}`);
