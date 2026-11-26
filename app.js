@@ -191,6 +191,28 @@ function md(src) {
    Diagrams (inline SVG, themed by CSS variables)
    ========================================================== */
 const FIGS = {
+  shutdown: {
+    cap: "Top: without preStop, the app closes its port while load balancers still route to it. Bottom: a short sleep lets routing catch up before shutdown starts.",
+    svg: () => {
+      const X0 = 150, S = 40; // 40px per second, t=0 at X0
+      const x = (t) => X0 + t * S;
+      const bar = (t1, t2, y, cls, label) => `<rect class="${cls}" x="${x(t1)}" y="${y}" width="${x(t2) - x(t1)}" height="26" rx="6"/><text class="d-s" x="${(x(t1) + x(t2)) / 2}" y="${y + 17}" text-anchor="middle" style="fill:var(--ink)">${label}</text>`;
+      const lane = (y, t) => `<text class="d-t" x="14" y="${y + 17}">${t}</text>`;
+      const axis = (y) => { let s = `<line class="d-line" x1="${x(0)}" y1="${y}" x2="${x(12)}" y2="${y}"/>`; for (let t = 0; t <= 12; t += 2) s += `<line class="d-line" x1="${x(t)}" y1="${y - 3}" x2="${x(t)}" y2="${y + 3}"/><text class="d-s" x="${x(t)}" y="${y + 16}" text-anchor="middle">${t}s</text>`; return s; };
+      return `<svg viewBox="0 0 660 304" role="img" aria-label="Pod termination timeline with and without a preStop sleep">
+        <text class="d-s" x="14" y="20" style="fill:var(--accent)">WITHOUT preStop</text>
+        ${lane(30, "Load balancer")}${bar(0, 5, 30, "d-box", "still routing to pod")}
+        ${lane(64, "Spring Boot")}${bar(0, 0.4, 64, "d-hot", "")}${bar(0.4, 5, 64, "d-hot", "port closed → 502s")}${bar(5, 9, 64, "d-box", "draining")}
+        ${axis(108)}
+        <text class="d-s" x="14" y="160" style="fill:var(--ok)">WITH preStop sleep 10s</text>
+        ${lane(170, "Load balancer")}${bar(0, 5, 170, "d-box", "routing")}${bar(5, 12, 170, "d-good", "removed ✓")}
+        ${lane(204, "kubelet")}${bar(0, 10, 204, "d-good", "preStop: sleep 10")}<text class="d-s" x="${x(10) + 6}" y="221" style="fill:var(--accent)">SIGTERM</text>
+        ${lane(238, "Spring Boot")}${bar(0, 10, 238, "d-box", "serving normally")}${bar(10, 12, 238, "d-good", "drain")}
+        <line class="d-line d-acc d-dash" x1="${x(10)}" y1="164" x2="${x(10)}" y2="270"/>
+        ${axis(284)}
+      </svg>`;
+    },
+  },
   outbox: {
     cap: "The request path writes only to Postgres. The relay publishes outbox rows to Kafka and marks them published after the broker acks.",
     svg: () => {

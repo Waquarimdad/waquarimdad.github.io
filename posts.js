@@ -9,6 +9,151 @@
    ========================================================== */
 window.POSTS = [
 {
+  slug: "zero-downtime-deploys-spring-boot-kubernetes",
+  title: "Zero-downtime deploys: what really happens to in-flight requests when Kubernetes stops your Spring Boot pod",
+  dek: "A rolling update is supposed to be invisible. The 502s you see during deploys come from a few seconds of disagreement between the kubelet, the load balancer and your JVM.",
+  date: "2026-11-26",
+  tags: ["kubernetes", "spring-boot", "aws", "reliability"],
+  body: `
+> !tldr Turn on \`server.shutdown=graceful\`, give the pod a short \`preStop\` sleep so load balancers stop sending traffic **before** the app stops accepting it, set \`terminationGracePeriodSeconds\` higher than sleep + drain time, and use separate readiness and liveness probes. Then make your Kafka consumers and scheduled jobs shut down cleanly too, because HTTP isn't the only thing in flight.
+
+## The symptom
+
+Every deploy, a handful of requests fail. A few 502s or 503s from the load balancer, a "connection reset" in a client log, maybe a duplicate Kafka message afterwards. Nothing is broken in the new version. The errors happen in the seconds while old pods are going away.
+
+Rolling updates promise zero downtime, and Kubernetes keeps its side of the deal: it starts new pods before stopping old ones. What it doesn't do is coordinate the *order* in which everything else finds out that an old pod is leaving.
+
+## Two things happen at once
+
+When Kubernetes decides to terminate a pod, two independent chains start in parallel:
+
+1. **The kubelet** on the node runs the \`preStop\` hook (if any), then sends \`SIGTERM\` to your container. After \`terminationGracePeriodSeconds\` it sends \`SIGKILL\`.
+2. **The control plane** marks the pod as terminating and removes it from the Service's endpoints. kube-proxy on every node, and any external load balancer (an AWS ALB, an ingress controller), then update their routing tables. That takes a few seconds, sometimes more.
+
+:::fig shutdown
+
+If your JVM reacts to \`SIGTERM\` by closing its HTTP port immediately, chain 1 wins the race. The load balancer still thinks the pod is healthy and keeps sending it requests for a few seconds, and they hit a closed port. That's where the 502s come from.
+
+## Step 1: graceful shutdown in Spring Boot
+
+Since Spring Boot 2.3, the embedded server can drain in-flight requests:
+
+~~~yaml
+server:
+  shutdown: graceful            # stop accepting new requests, finish active ones
+spring:
+  lifecycle:
+    timeout-per-shutdown-phase: 25s   # max time to wait for in-flight work
+~~~
+
+On \`SIGTERM\`, Tomcat (or Jetty/Undertow/Netty) stops accepting new connections and lets active requests finish, up to the timeout. That fixes requests that were *already* inside the pod. It doesn't fix requests the load balancer is *still sending*, because the server now refuses them.
+
+## Step 2: a preStop sleep
+
+The fix for the race is unglamorous: wait a few seconds before starting shutdown, so routing catches up first.
+
+~~~yaml
+spec:
+  terminationGracePeriodSeconds: 45
+  containers:
+    - name: orders
+      lifecycle:
+        preStop:
+          exec:
+            command: ["sh", "-c", "sleep 10"]
+~~~
+
+During those 10 seconds the pod keeps serving normally, while endpoints are removed and load balancers stop routing to it. Only then does the kubelet send \`SIGTERM\`, and Spring's graceful shutdown drains whatever is left.
+
+> !note Newer Kubernetes versions support a native \`sleep\` action in \`preStop\`, so you don't need a shell in the image. Distroless images without \`sh\` need either that or a small sleep binary.
+
+## Step 3: get the budget right
+
+All of this has to fit inside the grace period, or the kubelet sends \`SIGKILL\` halfway through your drain:
+
+| Phase | Example |
+|---|---|
+| preStop sleep | 10s |
+| Spring drain (\`timeout-per-shutdown-phase\`) | up to 25s |
+| Safety margin | 10s |
+| **terminationGracePeriodSeconds** | **45s** |
+
+If you're behind an AWS ALB, also check the target group's **deregistration delay**. The default is 300 seconds. The ALB keeps existing connections open to a draining target for that long, which slows deploys but doesn't break them. A value close to your preStop sleep + drain time is usually enough.
+
+## Step 4: readiness and liveness are different questions
+
+Spring Boot Actuator exposes separate probe groups. Use them separately:
+
+~~~yaml
+management:
+  endpoint:
+    health:
+      probes:
+        enabled: true
+  health:
+    readiness:
+      include: readinessState,db      # "can I take traffic right now?"
+    liveness:
+      include: livenessState          # "is the process wedged?"
+~~~
+
+~~~yaml
+readinessProbe:
+  httpGet: { path: /actuator/health/readiness, port: 8080 }
+  periodSeconds: 5
+  failureThreshold: 3
+livenessProbe:
+  httpGet: { path: /actuator/health/liveness, port: 8080 }
+  periodSeconds: 10
+  failureThreshold: 6
+startupProbe:
+  httpGet: { path: /actuator/health/liveness, port: 8080 }
+  periodSeconds: 5
+  failureThreshold: 30              # up to 150s for a cold JVM to start
+~~~
+
+- **Readiness** can include dependencies like the database. If Postgres is down, stop sending this pod traffic, but don't restart it.
+- **Liveness** must not include dependencies. If it does, a database blip makes Kubernetes restart every pod at once, and they all come back to the same broken database.
+- **Startup probe** keeps liveness from killing a JVM that's still warming up.
+
+When graceful shutdown begins, Spring flips the readiness state to refusing traffic on its own, which helps anything else polling the readiness endpoint.
+
+## Step 5: HTTP isn't the only thing in flight
+
+A pod also does work nobody sends it over HTTP. Each of these needs to stop cleanly within the same grace period:
+
+- **Kafka consumers.** Spring Kafka stops listener containers during shutdown. Make sure the current record finishes and its offset is committed, or the next pod reprocesses it. Your consumers should be idempotent anyway, because a \`SIGKILL\` can always land mid-record.
+- **Scheduled jobs.** \`@Scheduled\` tasks are interrupted at shutdown. If a job can't safely stop halfway, make it resumable (a checkpoint row) or hold a short lease so another pod picks it up.
+- **Async executors.** Set \`spring.task.execution.shutdown.await-termination=true\` and a sensible \`await-termination-period\`, so queued \`@Async\` work isn't silently dropped.
+- **Outbound connections.** Connection pools close at the end. Anything still running after the drain timeout fails, which is another reason not to let the budget run out.
+
+## Step 6: prove it
+
+Don't trust the YAML. Generate steady traffic and roll the deployment:
+
+~~~bash
+# terminal 1: constant load, count non-2xx responses
+hey -z 120s -q 20 -c 10 https://orders.internal.example/api/health-ish
+
+# terminal 2: trigger a rolling update
+kubectl rollout restart deployment/orders
+kubectl rollout status deployment/orders
+~~~
+
+Zero non-2xx responses across several rollouts is the bar. If you see a few, the preStop sleep is usually too short for your load balancer. If you see a burst at the very end of each pod's life, the grace period is too short for your drain.
+
+## Checklist
+
+- \`server.shutdown=graceful\` with a \`timeout-per-shutdown-phase\` that fits your slowest normal request.
+- A \`preStop\` sleep of roughly 5–15 seconds, so routing updates before the app stops accepting traffic.
+- \`terminationGracePeriodSeconds\` longer than sleep + drain + margin.
+- Separate readiness (may include dependencies) and liveness (never includes dependencies) probes, plus a startup probe for slow JVM starts.
+- Kafka consumers, scheduled jobs and async executors shut down within the same budget.
+- On an AWS ALB, a deregistration delay that matches your drain time.
+- Verified under load with real rollouts, not assumed.
+`
+},
+{
   slug: "transactional-outbox-kafka-spring-boot",
   title: "The dual-write trap: publishing Kafka events reliably with the transactional outbox",
   dek: "Saving to the database and publishing to Kafka looks like two lines of code. It's actually a distributed transaction, and it fails in the gap between them.",
