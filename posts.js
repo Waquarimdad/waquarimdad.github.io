@@ -9,6 +9,131 @@
    ========================================================== */
 window.POSTS = [
 {
+  slug: "hikaricp-connection-pool-sizing",
+  title: "More connections, slower service: sizing HikariCP and Postgres for Spring Boot",
+  dek: "When an API slows down under load, the first instinct is a bigger connection pool. It's usually the wrong move, and the math for why fits on a napkin.",
+  date: "2026-11-28",
+  tags: ["postgres", "spring-boot", "performance", "kubernetes"],
+  body: `
+> !tldr A database can only do a limited amount of work at once: roughly a small multiple of its CPU cores. Past that, extra connections just queue inside Postgres and add contention. Size each pool from **concurrency** (Little's law), keep the **total across all pods** under what the database can actually run, set a short \`connectionTimeout\` so overload fails fast, and keep transactions short. When you have many pods, put PgBouncer in front.
+
+## The symptom
+
+Under load, p99 latency climbs and you start seeing this in the logs:
+
+~~~text
+HikariPool-1 - Connection is not available, request timed out after 30000ms
+~~~
+
+The pool is exhausted, so the obvious fix is to raise \`maximumPoolSize\` from 10 to 50. Sometimes that helps for a day. Often latency gets *worse*, and the database CPU graph goes from busy to pinned.
+
+## Why more connections can be slower
+
+A Postgres connection is a whole backend process. Every one that is actively running a query competes for the same CPU cores, the same disk, the same locks and the same shared buffers. Once the number of active queries is well past the number of cores, the database spends more time switching between them and waiting on locks than doing work. Throughput stays flat or drops, and every query takes longer.
+
+:::fig pool
+
+A small pool with a short queue *in the application* is usually faster than a huge pool with a long queue *inside the database*. The application queue is cheap; the database queue is contention.
+
+## Size from concurrency, not from traffic
+
+Little's law gives you the number of connections you need busy at once:
+
+> !note **Connections needed ≈ requests per second that hit the DB × average time each request holds a connection.**
+
+If one pod handles 200 requests per second, and each holds a connection for 15 ms, that pod needs about 200 × 0.015 = **3** connections busy on average. Give it headroom for bursts and variance, maybe 2–3x, and a pool of **8–10** is plenty.
+
+The number that matters is how long a connection is *held*, not how long the request takes. A request that spends 300 ms calling another service while holding a connection needs 20 times more connections than one that holds it for 15 ms. That's the next section.
+
+## The real fix is usually shorter transactions
+
+Connections get held longer than you think:
+
+- **\`@Transactional\` around a remote call.** The connection is checked out at the start of the method and returned at the end, including the time spent waiting on an HTTP call or a Kafka send in the middle. Move remote calls outside the transaction.
+- **Open Session in View.** Spring Boot enables \`spring.jpa.open-in-view\` by default, which keeps the persistence context, and potentially a connection, open for the whole web request, including view rendering. Turn it off: \`spring.jpa.open-in-view=false\`.
+- **N+1 queries.** Fifty small round trips inside one transaction hold the connection fifty times longer than one join or batch fetch.
+- **Slow queries.** A missing index turns a 5 ms query into a 500 ms one. That's not a pool problem, but it looks exactly like one.
+
+~~~java
+// Holds a DB connection for the whole remote call
+@Transactional
+public void approve(long loanId) {
+    Loan loan = loans.findById(loanId).orElseThrow();
+    CreditScore score = bureau.fetchScore(loan.customerId());   // 300 ms over HTTP
+    loan.approve(score);
+}
+
+// Remote call first, then a short transaction
+public void approve(long loanId) {
+    long customerId = loans.customerIdOf(loanId);               // short read
+    CreditScore score = bureau.fetchScore(customerId);          // no connection held
+    approvals.applyScore(loanId, score);                        // @Transactional, a few ms
+}
+~~~
+
+## A sensible HikariCP config
+
+~~~yaml
+spring:
+  datasource:
+    hikari:
+      maximum-pool-size: 10          # from Little's law, not a guess
+      minimum-idle: 10               # fixed-size pool: no ramp-up under load
+      connection-timeout: 3000       # fail fast instead of piling up for 30s
+      max-lifetime: 1680000          # 28 min, below any DB/proxy idle cutoff
+      leak-detection-threshold: 20000  # log any connection held > 20s
+  jpa:
+    open-in-view: false
+~~~
+
+- **A fixed-size pool** (\`minimum-idle\` = \`maximum-pool-size\`) is what HikariCP's own docs recommend. You avoid the cost of opening connections exactly when traffic spikes.
+- **A short \`connection-timeout\`** turns pool exhaustion into a quick, visible error that your retry or circuit breaker can handle, instead of threads stuck for 30 seconds and the whole service seizing up.
+- **\`max-lifetime\`** a bit under whatever closes idle connections on the network path: the database, a proxy, or a load balancer.
+- **\`leak-detection-threshold\`** logs a stack trace for any connection held too long. It's the fastest way to find the method that holds a connection across a remote call.
+
+## Do the math across all pods
+
+This is where Kubernetes changes the picture. The pool is per pod, but the database sees all of them:
+
+| | Value |
+|---|---|
+| Pool size per pod | 10 |
+| Pods at normal load | 6 |
+| Pods at max autoscale | 20 |
+| Connections at max | **200** |
+| Plus batch jobs, migrations, admin tools | ~20 |
+
+Postgres's default \`max_connections\` is 100. Managed databases such as RDS set it from the instance size, and the number the database can *run efficiently* is lower still. If your autoscaler can multiply pods by three during a spike, it multiplies connections by three exactly when the database is already struggling.
+
+Ways out, roughly in order:
+
+1. **Shrink per-pod pools** once transactions are short. Most services need fewer connections than they're given.
+2. **Cap the autoscaler** with the database in mind, not just CPU.
+3. **Put PgBouncer in front of Postgres** in transaction pooling mode. Hundreds of client connections then share a small pool of real server connections. Check your driver settings first: transaction pooling doesn't keep session state between transactions, so server-side prepared statements and session-level settings need care.
+4. **Send read traffic to replicas** with a separate pool, if your reads can tolerate replica lag.
+
+## What to watch
+
+Spring Boot exposes HikariCP metrics through Micrometer. These four tell you most of the story:
+
+- \`hikaricp.connections.active\`: how many are busy. Close to max for long stretches means connections are held too long, or the pool really is too small.
+- \`hikaricp.connections.pending\`: threads waiting for a connection. Any sustained value here is your queue.
+- \`hikaricp.connections.usage\`: how long connections are held. This is the "time held" in Little's law, so watch it after every release.
+- \`hikaricp.connections.timeout\`: requests that gave up waiting. Alert on this.
+
+On the database side, watch active versus idle sessions in \`pg_stat_activity\`, and lock waits. If the database CPU is pinned while the pool is full, a bigger pool will make it worse, not better.
+
+## Checklist
+
+- Size each pool from requests per second × time a connection is held, plus headroom.
+- Keep remote calls out of \`@Transactional\` and turn off \`open-in-view\`.
+- Use a fixed-size pool with a short \`connection-timeout\` and leak detection on.
+- Multiply pool size by your *maximum* pod count and compare it with what the database can run.
+- Use PgBouncer when there are many pods or many services on one database.
+- Watch active, pending, usage and timeouts, and re-check after every release.
+`
+},
+{
   slug: "zero-downtime-deploys-spring-boot-kubernetes",
   title: "Zero-downtime deploys: what really happens to in-flight requests when Kubernetes stops your Spring Boot pod",
   dek: "A rolling update is supposed to be invisible. The 502s you see during deploys come from a few seconds of disagreement between the kubelet, the load balancer and your JVM.",

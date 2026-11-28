@@ -35,6 +35,12 @@ function motif(slug, x0, y0) {
     d.push("-stroke", PAPER, "-strokewidth", "10"); L(`arc ${x0 + 90},${y0 + 30} ${x0 + 210},${y0 + 170} 180,360`); L(`line ${x0 + 90},${y0 + 100} ${x0 + 90},${y0 + 130}`); L(`line ${x0 + 210},${y0 + 100} ${x0 + 210},${y0 + 130}`);
     d.push("-stroke", "none", "-fill", ACC); L(`roundrectangle ${x0 + 60},${y0 + 130} ${x0 + 240},${y0 + 270} 16,16`);
     d.push("-font", MONO_B, "-pointsize", "34", "-fill", INK, "-annotate", `+${x0 + 112}+${y0 + 213}`, "#34");
+  } else if (slug.startsWith("hikaricp")) {
+    d.push("-stroke", PAPER, "-strokewidth", "4", "-fill", "none", "-draw", `ellipse ${x0 + 220},${y0 + 70} 60,18 0,360`, "-draw", `line ${x0 + 160},${y0 + 70} ${x0 + 160},${y0 + 230}`, "-draw", `line ${x0 + 280},${y0 + 70} ${x0 + 280},${y0 + 230}`, "-draw", `ellipse ${x0 + 220},${y0 + 230} 60,18 0,180`);
+    d.push("-stroke", "none");
+    for (let i = 0; i < 4; i++) d.push("-fill", i < 3 ? OK : ACC, "-draw", `roundrectangle ${x0 + 175 + i * 23},${y0 + 140} ${x0 + 193 + i * 23},${y0 + 175} 4,4`);
+    for (let i = 0; i < 5; i++) d.push("-fill", i === 4 ? ACC : DIM, "-draw", `circle ${x0 + 20 + i * 24},${y0 + 158} ${x0 + 28 + i * 24},${y0 + 158}`);
+    d.push("-stroke", ACC, "-strokewidth", "4", "-draw", `line ${x0 + 130},${y0 + 158} ${x0 + 152},${y0 + 158}`);
   } else if (slug.startsWith("zero-downtime")) {
     d.push("-stroke", DIM, "-strokewidth", "3", "-fill", "none");
     for (let i = 0; i < 3; i++) d.push("-draw", `roundrectangle ${x0 + i * 100},${y0 + 90} ${x0 + i * 100 + 80},${y0 + 170} 12,12`);

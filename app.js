@@ -191,6 +191,30 @@ function md(src) {
    Diagrams (inline SVG, themed by CSS variables)
    ========================================================== */
 const FIGS = {
+  pool: {
+    cap: "Left: a huge pool pushes the queue into Postgres, where queries fight over 4 cores. Right: a small pool keeps a cheap queue in the app and the database runs at full speed.",
+    svg: () => {
+      const dots = (x0, y0, n, cols, cls) => { let s = ""; for (let i = 0; i < n; i++) s += `<circle cx="${x0 + (i % cols) * 14}" cy="${y0 + Math.floor(i / cols) * 14}" r="5" class="${cls}"/>`; return s; };
+      const core = (x, y, busy) => `<rect x="${x}" y="${y}" width="24" height="30" rx="5" class="${busy ? "d-good" : "d-box"}"/>`;
+      const side = (ox, title, titleColor, poolN, appQ, dbQ) => `
+        <text class="d-s" x="${ox + 150}" y="22" text-anchor="middle" style="fill:${titleColor}">${title}</text>
+        <rect class="d-box" x="${ox + 10}" y="40" width="110" height="160" rx="12"/><text class="d-t" x="${ox + 65}" y="62" text-anchor="middle">App pods</text>
+        <text class="d-s" x="${ox + 65}" y="78" text-anchor="middle">waiting in app</text>
+        ${dots(ox + 30, 96, appQ, 6, "d-qa")}
+        <text class="d-s" x="${ox + 65}" y="186" text-anchor="middle">pool = ${poolN}</text>
+        <line class="d-line" x1="${ox + 120}" y1="120" x2="${ox + 168}" y2="120"/><path class="d-line" d="M${ox + 160} 115 L${ox + 168} 120 L${ox + 160} 125"/>
+        <rect class="${dbQ > 8 ? "d-hot" : "d-box"}" x="${ox + 170}" y="40" width="130" height="160" rx="12"/><text class="d-t" x="${ox + 235}" y="62" text-anchor="middle">Postgres</text>
+        <text class="d-s" x="${ox + 235}" y="78" text-anchor="middle">${dbQ > 8 ? "queued + lock waits" : "running"}</text>
+        ${dots(ox + 190, 96, dbQ, 7, dbQ > 8 ? "d-qd" : "d-qa")}
+        ${core(ox + 183, 152, true)}${core(ox + 213, 152, true)}${core(ox + 243, 152, true)}${core(ox + 273, 152, true)}
+        <text class="d-s" x="${ox + 235}" y="216" text-anchor="middle">4 cores</text>`;
+      return `<svg viewBox="0 0 640 230" role="img" aria-label="Large pool versus small pool with Postgres">
+        <style>.d-qa{fill:var(--ink-3)}.d-qd{fill:var(--accent)}</style>
+        ${side(0, "POOL = 50 PER POD", "var(--accent)", 50, 0, 28)}
+        ${side(330, "POOL = 8 PER POD", "var(--ok)", 8, 12, 4)}
+      </svg>`;
+    },
+  },
   shutdown: {
     cap: "Top: without preStop, the app closes its port while load balancers still route to it. Bottom: a short sleep lets routing catch up before shutdown starts.",
     svg: () => {
